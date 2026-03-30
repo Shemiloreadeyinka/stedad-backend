@@ -18,8 +18,10 @@ app.use(cors({
       "http://localhost:3000",
       "https://stedad-frontend.vercel.app"
     ],
+     methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
     credentials: true
   }));
+app.options("*", cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
