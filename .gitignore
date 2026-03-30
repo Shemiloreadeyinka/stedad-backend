@@ -1,0 +1,6 @@
+.env            # environment variables
+*.log           # log files
+node_modules/
+dist/           # compiled output
+coverage/       # test coverage reports
+npm-debug.log*
