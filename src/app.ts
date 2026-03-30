@@ -13,7 +13,13 @@ import salesRoutes from "./routes/salesRoute";
 import customerRoutes from "./routes/customerRoute";
 const app = express();
 connectDB();
-app.use(cors());
+app.use(cors({
+    origin: [
+      "http://localhost:3000",
+      "https://stedad-frontend.vercel.app"
+    ],
+    credentials: true
+  }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
