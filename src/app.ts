@@ -31,6 +31,9 @@ app.use("/api/auth", authRoutes);
 app.use("/api/products", productRoutes);
 app.use("/api/sales", salesRoutes);
 app.use("/api/customers", customerRoutes);
+app.get("/", (req, res) => {
+  res.status(200).json({ message: "Stedad backend is running" });
+});
 
 
 export default app;
