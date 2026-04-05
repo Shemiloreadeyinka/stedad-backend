@@ -58,10 +58,22 @@ export const createSale = async (req: Request, res: Response): Promise<void> => 
         const { items, customerName, paymentMethod, isPaid } = req.body;
 
         // 1️⃣ Validate required fields
-        if (!items || !items.length || !customerName || !paymentMethod || isPaid === undefined) {
+        if (!items || !items.length || !customerName || !Array.isArray(paymentMethod) || !paymentMethod.length || isPaid === undefined) {
             res.status(400).json({ message: "Please provide all required fields" });
             return;
         }
+
+        // Check for duplicate payment methods
+        const methods = paymentMethod.map((p: any) => p.method);
+        const uniqueMethods = new Set(methods);
+        if (methods.length !== uniqueMethods.size) {
+            res.status(400).json({ message: "Duplicate payment methods are not allowed" });
+            return;
+        }   
+        const paymentTotal = paymentMethod.reduce(
+            (sum: number, p: any) => sum + Number(p.amount),
+            0
+        );
 
         // 2️⃣ Get logged-in staff
         if (!req.user?.id) {
@@ -89,6 +101,19 @@ export const createSale = async (req: Request, res: Response): Promise<void> => 
                 price: product.price,
             };
         });
+
+        if (paymentTotal !== totalAmount) {
+            res.status(400).json({
+                message: "Payment total must equal totalAmount",
+            });
+            return;
+        }
+
+        // 4.5️⃣ Validate total paid against total amount if marked paid
+        if (isPaid && paymentTotal < totalAmount) {
+            res.status(400).json({ message: `Total amount paid (${paymentTotal}) is less than the total sale amount (${totalAmount})` });
+            return;
+        }
 
         // 5️⃣ Generate daily-incrementing salesId
         const now = new Date();
@@ -287,7 +312,7 @@ export const getEndOfDaySales = async (req: Request, res: Response): Promise<voi
         const { date } = req.query;
         let targetDate = date;
         if (!targetDate) {
-            targetDate = new Date().toISOString().split("T")[0]; // Default to today
+            targetDate = new Date().toISOString().split("T")[0];
         }
 
         if (typeof targetDate !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(targetDate)) {
@@ -330,13 +355,50 @@ export const getEndOfDaySales = async (req: Request, res: Response): Promise<voi
                         },
                     ],
                     paymentMethods: [
+                        { $match: { isPaid: true } },
+                        { $unwind: "$paymentMethod" },
                         {
                             $group: {
-                                _id: "$paymentMethod",
-                                count: { $sum: 1 },
-                                amount: { $sum: "$totalAmount" },
+                                _id: "$paymentMethod.method",
+                                saleIds: { $addToSet: "$_id" },
+                                amount: { $sum: "$paymentMethod.amount" },
                             },
                         },
+                        {
+                            $project: {
+                                _id: 1,
+                                count: { $size: "$saleIds" },
+                                amount: 1,
+                            }
+                        },
+                    ],
+                    productsSold: [
+                        { $unwind: "$items" },
+                        {
+                            $group: {
+                                _id: "$items.product",
+                                count: { $sum: "$items.quantity" },
+                                amount: { $sum: { $multiply: ["$items.quantity", "$items.price"] } }
+                            }
+                        },
+                        {
+                            $lookup: {
+                                from: "products",
+                                localField: "_id",
+                                foreignField: "_id",
+                                as: "productDetails"
+                            }
+                        },
+                        { $unwind: { path: "$productDetails", preserveNullAndEmptyArrays: true } },
+                        {
+                            $project: {
+                                _id: 0,
+                                productId: "$_id",
+                                name: { $ifNull: ["$productDetails.name", "Unknown Product"] },
+                                count: 1,
+                                amount: 1
+                            }
+                        }
                     ],
                 },
             },
@@ -346,15 +408,17 @@ export const getEndOfDaySales = async (req: Request, res: Response): Promise<voi
         const paidRow = (summary?.paymentStatus || []).find((row: { _id: boolean }) => row._id === true);
         const unpaidRow = (summary?.paymentStatus || []).find((row: { _id: boolean }) => row._id === false);
         const methods = summary?.paymentMethods || [];
+        const productsSold = summary?.productsSold || [];
+        const totalProductsSold = productsSold.reduce((acc: number, p: any) => acc + p.count, 0);
 
-        const paymentMethodBreakdown = {
+        const paymentMethodBreakdown: Record<string, { count: number; amount: number }> = {
             Cash: { count: 0, amount: 0 },
             Transfer: { count: 0, amount: 0 },
-            Pos: { count: 0, amount: 0 },
+            POS: { count: 0, amount: 0 },
         };
 
-        methods.forEach((row: { _id: "Cash" | "Transfer" | "Pos"; count: number; amount: number }) => {
-            if (row._id && paymentMethodBreakdown[row._id]) {
+        methods.forEach((row: { _id: string; count: number; amount: number }) => {
+            if (row._id && paymentMethodBreakdown[row._id] !== undefined) {
                 paymentMethodBreakdown[row._id] = {
                     count: row.count,
                     amount: row.amount,
@@ -380,6 +444,8 @@ export const getEndOfDaySales = async (req: Request, res: Response): Promise<voi
                 amount: unpaidRow?.amount || 0,
             },
             paymentMethodBreakdown,
+            totalProductsSold,
+            productsSold,
         });
     } catch (error) {
         res.status(500).json({
@@ -417,7 +483,11 @@ const buildSaleReceiptData = async (id: string): Promise<ReceiptData | null> => 
         customerName: sale.customerName,
         staffName: staff?.fullname || "N/A",
         staffCode: staff?.StaffId || "N/A",
-        paymentMethod: sale.paymentMethod,
+        paymentMethod: sale.paymentMethod.map((p: any) => p.method) as string[],
+        paymentBreakdown: sale.paymentMethod.reduce((acc: Record<string, number>, p: any) => {
+            acc[p.method] = p.amount;
+            return acc;
+        }, {}),
         isPaid: sale.isPaid,
         totalAmount: sale.totalAmount,
         items: sale.items.map((item) => {
@@ -488,7 +558,7 @@ export const getSaleReceipt = async (req: Request, res: Response): Promise<void>
     <p class="meta">Date: ${escapeHtml(receipt.printedAt)}</p>
     <p class="meta">Customer: ${escapeHtml(receipt.customerName)}</p>
     <p class="meta">Staff: ${escapeHtml(receipt.staffName)} (${escapeHtml(receipt.staffCode)})</p>
-    <p class="meta">Payment: ${escapeHtml(receipt.paymentMethod)} | ${receipt.isPaid ? "Paid" : "Unpaid"}</p>
+    <p class="meta">Payment: ${escapeHtml(receipt.paymentMethod.map(m => `${m}: NGN ${(receipt.paymentBreakdown[m] ?? 0).toFixed(2)}`).join(" | "))} | ${receipt.isPaid ? "Paid" : "Unpaid"}</p>
 
     <table>
       <thead>

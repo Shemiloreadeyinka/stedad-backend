@@ -14,7 +14,7 @@ export interface Isale extends Document {
     customerName: string
 
     totalAmount: number
-    paymentMethod: "Transfer" | "Cash" | "Pos"
+    paymentMethod: { method: "Transfer" | "Cash" | "POS", amount: number }[]
     isPaid: boolean
     createdAt: Date
 }
@@ -41,10 +41,14 @@ const salesSchema = new Schema<Isale>({
     staffId: { type: Schema.Types.ObjectId, ref: "Staff", required: true },
     items: [{ type: saleItemSchema, required: true }],
     customerName: { type: String, required: true },
-    totalAmount: { type: Number,required:true},
-    paymentMethod: { type: String, enum: ["Transfer", "Cash", "Pos"], required: true },
+    totalAmount: { type: Number, required: true },
+    paymentMethod: [
+        {
+            method: { type: String, enum: ["Transfer", "Cash", "POS"], required: true },
+            amount: { type: Number, required: true, min: 0 }
+        }
+    ],
     isPaid: { type: Boolean, required: true },
-
 }, { timestamps: true })
 
 

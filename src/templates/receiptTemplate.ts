@@ -11,7 +11,8 @@ export interface ReceiptData {
     customerName: string;
     staffName: string;
     staffCode: string;
-    paymentMethod: string;
+    paymentMethod: string[];
+    paymentBreakdown: Record<string, number>;
     isPaid: boolean;
     totalAmount: number;
     items: ReceiptItem[];
@@ -25,7 +26,7 @@ export const buildReceiptHeader = (receipt: ReceiptData): string[] => {
         `Date: ${receipt.printedAt}`,
         `Customer: ${receipt.customerName}`,
         `Staff: ${receipt.staffName} (${receipt.staffCode})`,
-        `Payment: ${receipt.paymentMethod} | ${status}`,
+        `Payment: ${receipt.paymentMethod.map(m => `${m}: NGN ${(receipt.paymentBreakdown[m] ?? 0).toFixed(2)}`).join(" | ")} | ${status}`,
     ];
 };
 
